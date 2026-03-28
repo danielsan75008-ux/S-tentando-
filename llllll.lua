@@ -12,7 +12,6 @@ local WindUI = loadstring(game:HttpGet(
 --  SERVICES
 -- ═══════════════════════════════════
 local Players      = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
 local RunService   = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
@@ -24,28 +23,13 @@ TargetPlayer      = nil
 AttachEnabled     = false
 AutoAttackEnabled = false
 DistanceValue     = 5
-SpeedValue        = 100   -- 1 a 1000, quanto maior mais rápido
 OrbitSpeedValue   = 1.5
-SelectedPosition  = "Behind"
+SelectedPosition  = "Behind"  -- "Behind" | "OrbitTop"
 
 local orbitAngle  = 0
 local attachLoop  = nil
 local orbitLoop   = nil
 local autoAtkLoop = nil
-
--- ═══════════════════════════════════
---  TABELA DE POSIÇÕES
--- ═══════════════════════════════════
-local Positions = {
-    Behind  = { offset = Vector3.new(0, 0,  1), angle = 0          },
-    Front   = { offset = Vector3.new(0, 0, -1), angle = math.pi    },
-    Above   = { offset = Vector3.new(0, 1,  0), angle = 0          },
-    Below   = { offset = Vector3.new(0,-1,  0), angle = 0          },
-    Left    = { offset = Vector3.new(-1,0,  0), angle = math.pi/2  },
-    Right   = { offset = Vector3.new( 1,0,  0), angle =-math.pi/2  },
-    TopDown = { offset = Vector3.new(0, 1,  0), angle = math.pi/2  },
-    Orbit   = { offset = Vector3.new(0, 0,  1), angle = 0          },
-}
 
 -- ═══════════════════════════════════
 --  FUNÇÕES
@@ -57,62 +41,46 @@ local function getTarget()
     return nil
 end
 
-local function getOffsetPosition(targetHRP, distance)
-    if SelectedPosition == "Orbit" then
-        local x = math.cos(orbitAngle) * distance
-        local z = math.sin(orbitAngle) * distance
-        return CFrame.new(targetHRP.Position + Vector3.new(x, 0, z))
-            * CFrame.Angles(0, -(orbitAngle + math.pi / 2), 0)
-    end
-    local pos = Positions[SelectedPosition]
-    if not pos then return nil end
-    local scaledOffset = pos.offset * distance
-    local worldOffset  = targetHRP.CFrame:VectorToWorldSpace(scaledOffset)
-    return CFrame.new(targetHRP.Position + worldOffset) * CFrame.Angles(0, pos.angle, 0)
+-- BEHIND: instantâneo, sempre atrás baseado na rotação atual do alvo
+local function attachBehind(myHRP, targetHRP)
+    -- Pega o CFrame atrás do alvo com base na direção que ele está olhando
+    local behindCF = targetHRP.CFrame * CFrame.new(0, 0, DistanceValue)
+    -- Rotaciona o player local para olhar para o alvo
+    local lookDir = (targetHRP.Position - behindCF.Position).Unit
+    myHRP.CFrame = CFrame.lookAt(behindCF.Position, behindCF.Position + lookDir)
 end
 
--- Tween suave: SpeedValue 1-1000 vira tempo de 1.0s até 0.001s
-local function createTween(character, goalCFrame)
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    local tweenTime = 1.0 / SpeedValue  -- 1 = lento (1s), 1000 = quase instantâneo (0.001s)
-    local info = TweenInfo.new(tweenTime, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
-    local t = TweenService:Create(hrp, info, { CFrame = goalCFrame })
-    t:Play()
+-- ORBIT TOP: órbita em cima do alvo, apontando para baixo
+local function attachOrbitTop(myHRP, targetHRP, dt)
+    orbitAngle = orbitAngle + OrbitSpeedValue * dt
+    local radius = DistanceValue
+    local height = DistanceValue * 1.2
+    local x = math.cos(orbitAngle) * radius
+    local z = math.sin(orbitAngle) * radius
+    local orbitPos = targetHRP.Position + Vector3.new(x, height, z)
+    -- Apontando para baixo (olha para o alvo que está embaixo)
+    myHRP.CFrame = CFrame.lookAt(orbitPos, targetHRP.Position)
 end
 
+-- ═══════════════════════════════════
+--  LOOPS
+-- ═══════════════════════════════════
 local function startAttachLoop()
     if attachLoop then attachLoop:Disconnect() end
-    attachLoop = RunService.Heartbeat:Connect(function()
-        if not AttachEnabled or SelectedPosition == "Orbit" then return end
-        local targetHRP = getTarget()
-        if not targetHRP then return end
-        local char = LocalPlayer.Character
-        if not char then return end
-        local goal = getOffsetPosition(targetHRP, DistanceValue)
-        if not goal then return end
-        -- Movimento direto: rápido e responsivo
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            hrp.CFrame = hrp.CFrame:Lerp(goal, math.clamp(SpeedValue / 500, 0.05, 1))
-        end
-    end)
-end
+    attachLoop = RunService.Heartbeat:Connect(function(dt)
+        if not AttachEnabled then return end
 
-local function startOrbitLoop()
-    if orbitLoop then orbitLoop:Disconnect() end
-    orbitLoop = RunService.Heartbeat:Connect(function(dt)
-        if not AttachEnabled or SelectedPosition ~= "Orbit" then return end
-        orbitAngle = orbitAngle + OrbitSpeedValue * dt
         local targetHRP = getTarget()
         if not targetHRP then return end
         local char = LocalPlayer.Character
         if not char then return end
-        local goal = getOffsetPosition(targetHRP, DistanceValue)
-        if not goal then return end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            hrp.CFrame = hrp.CFrame:Lerp(goal, math.clamp(SpeedValue / 500, 0.05, 1))
+        local myHRP = char:FindFirstChild("HumanoidRootPart")
+        if not myHRP then return end
+
+        if SelectedPosition == "Behind" then
+            attachBehind(myHRP, targetHRP)
+        elseif SelectedPosition == "OrbitTop" then
+            attachOrbitTop(myHRP, targetHRP, dt)
         end
     end)
 end
@@ -139,7 +107,6 @@ local function startAutoAttack()
 end
 
 startAttachLoop()
-startOrbitLoop()
 startAutoAttack()
 
 -- ═══════════════════════════════════
@@ -179,18 +146,18 @@ do
     end
 
     local playerDropdown
-    local initialPlayers = getPlayerNames()
+    local initialList = getPlayerNames()
     playerDropdown = TabAttach:Dropdown({
         Title    = "Select Target",
         Desc     = "Escolha o player alvo",
-        Options  = initialPlayers,
-        Default  = initialPlayers[1],
+        Options  = initialList,
+        Default  = initialList[1],
         Callback = function(selected)
-            if selected == "(Nenhum player)" then
-                TargetPlayer = nil
-            else
+            if selected ~= "(Nenhum player)" then
                 TargetPlayer = Players:FindFirstChild(selected) or nil
                 WindUI:Notify({ Title = "Target", Content = "Alvo: " .. tostring(selected), Duration = 2 })
+            else
+                TargetPlayer = nil
             end
         end,
     })
@@ -200,10 +167,7 @@ do
         pcall(function() playerDropdown:Refresh(getPlayerNames()) end)
     end)
     Players.PlayerRemoving:Connect(function(p)
-        if p == TargetPlayer then
-            TargetPlayer = nil
-            AttachEnabled = false
-        end
+        if p == TargetPlayer then TargetPlayer = nil; AttachEnabled = false end
         task.wait(0.5)
         pcall(function() playerDropdown:Refresh(getPlayerNames()) end)
     end)
@@ -221,15 +185,17 @@ do
     -- ── Position Mode ─────────────────────────────────
     TabAttach:Section({ Title = "Position Mode" })
 
-    -- FIX: Options como tabela de strings simples, Default igual ao primeiro item
-    local posOptions = {"Behind", "Front", "Above", "Below", "Left", "Right", "TopDown", "Orbit"}
+    -- Apenas 2 opções conforme pedido
+    local posOptions = { "Behind", "OrbitTop" }
     TabAttach:Dropdown({
         Title    = "Position Type",
-        Desc     = "Posição relativa ao alvo",
+        Desc     = "Behind = atrás instantâneo | OrbitTop = órbita em cima",
         Options  = posOptions,
-        Default  = posOptions[1],
+        Default  = "Behind",
         Callback = function(selected)
             SelectedPosition = tostring(selected)
+            -- Reseta ângulo ao trocar modo
+            orbitAngle = 0
         end,
     })
 
@@ -246,20 +212,9 @@ do
         end,
     })
 
-    -- SpeedValue de 1 a 1000 conforme pedido
-    TabAttach:Slider({
-        Title = "Tween Speed",
-        Desc  = "Velocidade do movimento (1 = lento | 1000 = instantâneo)",
-        Step  = 1,
-        Value = { Min = 1, Max = 1000, Default = 100 },
-        Callback = function(v)
-            SpeedValue = v
-        end,
-    })
-
     TabAttach:Slider({
         Title = "Orbit Speed",
-        Desc  = "Velocidade de rotação no modo Orbit",
+        Desc  = "Velocidade de rotação no modo OrbitTop",
         Step  = 1,
         Value = { Min = 1, Max = 10, Default = 3 },
         Callback = function(v)

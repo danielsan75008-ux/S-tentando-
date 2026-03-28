@@ -3,7 +3,19 @@
 --   Wind UI v2 | By CoiledTom
 -- ============================================================
 
-local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/source.lua"))()
+local WindUI
+do
+    local ok, result = pcall(function()
+        return loadstring(game:HttpGet(
+            "https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/dist/source.lua",
+            true
+        ))()
+    end)
+    if not ok then
+        error("[CoiledTom Hub] Falha ao carregar Wind UI v2:\n" .. tostring(result))
+    end
+    WindUI = result
+end
 
 -- ============================================================
 -- SERVICES

@@ -43,27 +43,39 @@ local function getTarget()
     return nil
 end
 
--- Faz o player local olhar para o alvo SEM mover de lugar (so rotaciona no eixo Y)
-local function lookAtTarget(myHRP, targetHRP)
-    local pos    = myHRP.Position
-    local lookAt = Vector3.new(targetHRP.Position.X, pos.Y, targetHRP.Position.Z)
-    -- CFrame.new(pos, lookAt) aponta o +Z para o alvo sem mudar a posicao
-    myHRP.CFrame = CFrame.new(pos, lookAt)
-end
+-- ═══════════════════════════════════
+--  LOOK AT SYSTEM
+-- ═══════════════════════════════════
+LookAtEnabled      = false
+LookAtSpeedValue   = 10     -- 1 (lento) a 20 (instantaneo)
+LookAtMaxDist      = 100    -- distancia maxima para ativar o look
 
--- Loop separado: fica girando o personagem para olhar o alvo SEMPRE que AttachEnabled ligado
 local lookLoop = nil
+
 local function startLookLoop()
     if lookLoop then lookLoop:Disconnect() end
-    lookLoop = RunService.Heartbeat:Connect(function()
-        if not AttachEnabled then return end
+    lookLoop = RunService.Heartbeat:Connect(function(dt)
+        if not LookAtEnabled then return end
+
         local targetHRP = getTarget()
         if not targetHRP then return end
+
         local char = LocalPlayer.Character
         if not char then return end
         local myHRP = char:FindFirstChild("HumanoidRootPart")
         if not myHRP then return end
-        lookAtTarget(myHRP, targetHRP)
+
+        -- Checa distancia maxima
+        local dist = (myHRP.Position - targetHRP.Position).Magnitude
+        if dist > LookAtMaxDist then return end
+
+        -- Calcula o CFrame destino olhando para o alvo (so eixo Y, sem inclinar)
+        local targetPos = Vector3.new(targetHRP.Position.X, myHRP.Position.Y, targetHRP.Position.Z)
+        local goalCF    = CFrame.new(myHRP.Position, targetPos)
+
+        -- Lerp suave baseado na velocidade configurada
+        local alpha = math.clamp(LookAtSpeedValue * dt, 0, 1)
+        myHRP.CFrame = myHRP.CFrame:Lerp(goalCF, alpha)
     end)
 end
 
@@ -105,62 +117,38 @@ local function movePlayer(myHRP, goalCF)
 end
 
 -- ═══════════════════════════════════
---  AUTO ATTACK — PunchButton + fallback remotes
+--  AUTO ATTACK — clica PunchButton em loop
 -- ═══════════════════════════════════
 
--- Procura PunchButton em toda a PlayerGui e clica via MouseButton1Click
-local function findAndClickPunchButton()
+-- Encontra o PunchButton na PlayerGui
+local function getPunchButton()
     local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if not playerGui then return false end
+    if not playerGui then return nil end
     for _, obj in ipairs(playerGui:GetDescendants()) do
         if (obj:IsA("TextButton") or obj:IsA("ImageButton")) and obj.Name == "PunchButton" then
-            -- Dispara o evento de clique do botao
-            pcall(function()
-                local conn
-                conn = obj.MouseButton1Click:Connect(function() end)
-                conn:Disconnect()
-                obj.MouseButton1Click:Fire()
-            end)
-            -- Tenta tambem via ClickDetector pai se existir
-            pcall(function() obj:Activate() end)
-            return true
+            return obj
         end
     end
-    return false
+    return nil
 end
 
--- Fallback: procura RemoteEvents com keywords de ataque
-local ATTACK_KEYWORDS = { "attack", "Attack", "hit", "Hit", "punch", "Punch", "atk", "Atk", "swing", "Swing", "strike", "Strike" }
-
-local function fireAttackRemote(char)
-    -- 1. Tool equipada
-    local tool = char:FindFirstChildOfClass("Tool")
-    if tool then
-        for _, obj in ipairs(tool:GetDescendants()) do
-            if obj:IsA("RemoteEvent") or obj:IsA("BindableEvent") then
-                for _, kw in ipairs(ATTACK_KEYWORDS) do
-                    if string.find(obj.Name, kw) then
-                        pcall(function()
-                            if obj:IsA("RemoteEvent") then obj:FireServer()
-                            else obj:Fire() end
-                        end)
-                        return
-                    end
-                end
-            end
-        end
-        -- Ativa a tool diretamente
-        pcall(function() tool:Activate() end)
-    end
-end
-
-local function fireAttack(char)
-    -- Primeiro tenta clicar o PunchButton na GUI
-    local clicked = findAndClickPunchButton()
-    -- Se nao achou PunchButton, usa fallback de remotes
-    if not clicked then
-        fireAttackRemote(char)
-    end
+-- Simula clique real no PunchButton
+local function clickPunchButton()
+    local btn = getPunchButton()
+    if not btn then return end
+    pcall(function()
+        -- Metodo 1: fire direto do sinal (mais compativel)
+        local vInputObject = {
+            UserInputType = Enum.UserInputType.MouseButton1,
+            UserInputState = Enum.UserInputState.Begin,
+            Position = Vector3.new(0,0,0),
+        }
+        btn:SimulateClickOrTouch()
+    end)
+    pcall(function()
+        -- Metodo 2: fireclick via MouseButton1Click (funciona na maioria dos jogos)
+        btn.MouseButton1Click:Fire()
+    end)
 end
 
 -- ═══════════════════════════════════
@@ -193,17 +181,18 @@ end
 
 local function startAutoAttack()
     if autoAtkLoop then autoAtkLoop:Disconnect() end
+    -- Usa task.spawn com loop proprio para bater em intervalo fixo (nao por frame)
     autoAtkLoop = RunService.Heartbeat:Connect(function()
-        if not AutoAttackEnabled then return end
-        local targetHRP = getTarget()
-        if not targetHRP then return end
-        local char = LocalPlayer.Character
-        if not char then return end
-        local myRoot = char:FindFirstChild("HumanoidRootPart")
-        if not myRoot then return end
-        local dist = (targetHRP.Position - myRoot.Position).Magnitude
-        if dist <= DistanceValue + 6 then
-            fireAttack(char)
+        -- so usado para manter o loop vivo; o click e feito pelo task abaixo
+    end)
+    task.spawn(function()
+        while true do
+            task.wait(0.1) -- intervalo entre cliques (100ms)
+            if not AutoAttackEnabled then
+                task.wait(0.1)
+            else
+                clickPunchButton()
+            end
         end
     end)
 end
@@ -364,12 +353,49 @@ do
         end,
     })
 
+    -- ── Look At Settings ──────────────────────────────
+    TabAttach:Section({ Title = "Look At Settings" })
+
+    TabAttach:Toggle({
+        Title = "Look At Target",
+        Desc  = "Personagem fica olhando para o alvo continuamente",
+        Value = false,
+        Callback = function(v)
+            LookAtEnabled = v
+            WindUI:Notify({
+                Title    = "Look At",
+                Content  = v and "Look At ATIVADO!" or "Look At desativado.",
+                Duration = 2,
+            })
+        end,
+    })
+
+    TabAttach:Slider({
+        Title = "Look At Speed",
+        Desc  = "Velocidade de rotacao para olhar o alvo",
+        Step  = 1,
+        Value = { Min = 1, Max = 20, Default = 10 },
+        Callback = function(v)
+            LookAtSpeedValue = v
+        end,
+    })
+
+    TabAttach:Slider({
+        Title = "Max Distance",
+        Desc  = "Distancia maxima para ativar o look at (studs)",
+        Step  = 5,
+        Value = { Min = 5, Max = 300, Default = 100 },
+        Callback = function(v)
+            LookAtMaxDist = v
+        end,
+    })
+
     -- ── Controls ──────────────────────────────────────
     TabAttach:Section({ Title = "Controls" })
 
     TabAttach:Toggle({
         Title = "Toggle Attach",
-        Desc  = "Ativa movimentação relativa ao alvo",
+        Desc  = "Ativa movimentacao relativa ao alvo",
         Value = false,
         Callback = function(v)
             AttachEnabled = v
@@ -383,13 +409,13 @@ do
 
     TabAttach:Toggle({
         Title = "Auto Attack",
-        Desc  = "Procura e dispara eventos de ataque automaticamente",
+        Desc  = "Clica PunchButton em loop automaticamente",
         Value = false,
         Callback = function(v)
             AutoAttackEnabled = v
             WindUI:Notify({
                 Title    = "Auto Attack",
-                Content  = v and "Auto Attack ATIVADO!" or "Auto Attack desativado.",
+                Content  = v and "Auto Attack ATIVADO! Clicando PunchButton..." or "Auto Attack desativado.",
                 Duration = 2,
             })
         end,

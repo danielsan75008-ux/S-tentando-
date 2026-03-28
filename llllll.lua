@@ -1,66 +1,56 @@
 -- CoiledTom Hub | Target Attach System
 -- Wind UI v2 | By CoiledTom
 
-local WindUI
-do
-    local ok, result = pcall(function()
-        return loadstring(game:HttpGet(
-            "https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/dist/source.lua",
-            true
-        ))()
-    end)
-    if not ok then
-        warn("[CoiledTom Hub] Falha ao carregar Wind UI v2: " .. tostring(result))
-        return
-    end
-    WindUI = result
-end
+-- ═══════════════════════════════════
+--  LOAD WindUI v2
+-- ═══════════════════════════════════
+local WindUI = loadstring(game:HttpGet(
+    "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"
+))()
 
--- ============================================================
--- SERVICES
--- ============================================================
-local Players       = game:GetService("Players")
-local TweenService  = game:GetService("TweenService")
-local RunService    = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+-- ═══════════════════════════════════
+--  SERVICES
+-- ═══════════════════════════════════
+local Players          = game:GetService("Players")
+local TweenService     = game:GetService("TweenService")
+local RunService       = game:GetService("RunService")
 
--- ============================================================
--- VARIÁVEIS GLOBAIS
--- ============================================================
-local LocalPlayer        = Players.LocalPlayer
-TargetPlayer             = nil
-AttachEnabled            = false
-AutoAttackEnabled        = false
-DistanceValue            = 5
-SpeedValue               = 0.15
-OrbitSpeedValue          = 1
-SelectedPosition         = "Behind"
+local LocalPlayer = Players.LocalPlayer
 
-local orbitAngle         = 0
-local attachLoop         = nil
-local orbitLoop          = nil
-local autoAttackLoop     = nil
-local currentTween       = nil
+-- ═══════════════════════════════════
+--  VARIÁVEIS GLOBAIS
+-- ═══════════════════════════════════
+TargetPlayer      = nil
+AttachEnabled     = false
+AutoAttackEnabled = false
+DistanceValue     = 5
+SpeedValue        = 0.15
+OrbitSpeedValue   = 1.5
+SelectedPosition  = "Behind"
 
--- ============================================================
--- TABELA DE POSIÇÕES (offsets + rotação)
--- ============================================================
+local orbitAngle    = 0
+local currentTween  = nil
+local attachLoop    = nil
+local orbitLoop     = nil
+local autoAtkLoop   = nil
+
+-- ═══════════════════════════════════
+--  TABELA DE POSIÇÕES
+-- ═══════════════════════════════════
 local Positions = {
-    Behind    = { offset = Vector3.new(0, 0,  5),  angles = CFrame.Angles(0, 0,           0) },
-    Front     = { offset = Vector3.new(0, 0, -5),  angles = CFrame.Angles(0, math.pi,     0) },
-    Above     = { offset = Vector3.new(0, 5,  0),  angles = CFrame.Angles(0, 0,           0) },
-    Below     = { offset = Vector3.new(0,-5,  0),  angles = CFrame.Angles(0, 0,           0) },
-    Left      = { offset = Vector3.new(-5, 0, 0),  angles = CFrame.Angles(0, math.pi/2,   0) },
-    Right     = { offset = Vector3.new( 5, 0, 0),  angles = CFrame.Angles(0, -math.pi/2,  0) },
-    TopDown   = { offset = Vector3.new(0, 8,  0),  angles = CFrame.Angles(math.pi/2, 0,   0) },
-    Orbit     = { offset = Vector3.new(0, 0,  0),  angles = CFrame.Angles(0, 0,           0) }, -- calculado dinamicamente
+    Behind  = { offset = Vector3.new(0, 0,  1),  angle = 0           },
+    Front   = { offset = Vector3.new(0, 0, -1),  angle = math.pi     },
+    Above   = { offset = Vector3.new(0, 1,  0),  angle = 0           },
+    Below   = { offset = Vector3.new(0,-1,  0),  angle = 0           },
+    Left    = { offset = Vector3.new(-1, 0, 0),  angle = math.pi/2   },
+    Right   = { offset = Vector3.new( 1, 0, 0),  angle = -math.pi/2  },
+    TopDown = { offset = Vector3.new(0, 1,  0),  angle = math.pi/2   },
+    Orbit   = { offset = Vector3.new(0, 0,  1),  angle = 0           },
 }
 
--- ============================================================
--- FUNÇÕES PRINCIPAIS
--- ============================================================
-
--- Retorna o HumanoidRootPart do alvo
+-- ═══════════════════════════════════
+--  FUNÇÕES
+-- ═══════════════════════════════════
 local function getTarget()
     if TargetPlayer and TargetPlayer.Character then
         return TargetPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -68,296 +58,252 @@ local function getTarget()
     return nil
 end
 
--- Calcula a CFrame de destino com base na posição selecionada
 local function getOffsetPosition(targetHRP, distance)
+    if SelectedPosition == "Orbit" then
+        local x = math.cos(orbitAngle) * distance
+        local z = math.sin(orbitAngle) * distance
+        return CFrame.new(targetHRP.Position + Vector3.new(x, 0, z))
+            * CFrame.Angles(0, -(orbitAngle + math.pi / 2), 0)
+    end
+
     local pos = Positions[SelectedPosition]
     if not pos then return nil end
 
-    if SelectedPosition == "Orbit" then
-        local angle = orbitAngle
-        local x = math.cos(angle) * distance
-        local z = math.sin(angle) * distance
-        local orbitOffset = Vector3.new(x, 0, z)
-        return CFrame.new(targetHRP.Position + orbitOffset) * CFrame.Angles(0, -(angle + math.pi/2), 0)
-    end
-
-    local scaledOffset = pos.offset.Unit * distance
-    local targetCF     = targetHRP.CFrame
-    local worldOffset  = targetCF:VectorToWorldSpace(scaledOffset)
-    return CFrame.new(targetHRP.Position + worldOffset) * pos.angles
+    local scaledOffset = pos.offset * distance
+    local worldOffset  = targetHRP.CFrame:VectorToWorldSpace(scaledOffset)
+    return CFrame.new(targetHRP.Position + worldOffset)
+        * CFrame.Angles(0, pos.angle, 0)
 end
 
--- Cria e executa um Tween suave para movimentação
 local function createTween(character, goalCFrame)
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
-
-    if currentTween then
-        currentTween:Cancel()
-    end
-
-    local tweenInfo = TweenInfo.new(SpeedValue, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
-    currentTween = TweenService:Create(hrp, tweenInfo, { CFrame = goalCFrame })
+    if currentTween then currentTween:Cancel() end
+    local info = TweenInfo.new(SpeedValue, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
+    currentTween = TweenService:Create(hrp, info, { CFrame = goalCFrame })
     currentTween:Play()
 end
 
--- Loop principal de attach
 local function startAttachLoop()
     if attachLoop then attachLoop:Disconnect() end
-
     attachLoop = RunService.Heartbeat:Connect(function()
-        if not AttachEnabled then return end
-        if SelectedPosition == "Orbit" then return end -- Orbit tem loop próprio
-
+        if not AttachEnabled or SelectedPosition == "Orbit" then return end
         local targetHRP = getTarget()
         if not targetHRP then return end
-
-        local localChar = LocalPlayer.Character
-        if not localChar then return end
-
-        local goalCF = getOffsetPosition(targetHRP, DistanceValue)
-        if goalCF then
-            createTween(localChar, goalCF)
-        end
+        local char = LocalPlayer.Character
+        if not char then return end
+        local goal = getOffsetPosition(targetHRP, DistanceValue)
+        if goal then createTween(char, goal) end
     end)
 end
 
--- Loop de órbita
 local function startOrbitLoop()
     if orbitLoop then orbitLoop:Disconnect() end
-
     orbitLoop = RunService.Heartbeat:Connect(function(dt)
-        if not AttachEnabled then return end
-        if SelectedPosition ~= "Orbit" then return end
-
-        orbitAngle = orbitAngle + (OrbitSpeedValue * dt)
-
+        if not AttachEnabled or SelectedPosition ~= "Orbit" then return end
+        orbitAngle = orbitAngle + OrbitSpeedValue * dt
         local targetHRP = getTarget()
         if not targetHRP then return end
-
-        local localChar = LocalPlayer.Character
-        if not localChar then return end
-
-        local goalCF = getOffsetPosition(targetHRP, DistanceValue)
-        if goalCF then
-            createTween(localChar, goalCF)
-        end
+        local char = LocalPlayer.Character
+        if not char then return end
+        local goal = getOffsetPosition(targetHRP, DistanceValue)
+        if goal then createTween(char, goal) end
     end)
 end
 
--- Loop de auto-attack
 local function startAutoAttack()
-    if autoAttackLoop then autoAttackLoop:Disconnect() end
-
-    autoAttackLoop = RunService.Heartbeat:Connect(function()
+    if autoAtkLoop then autoAtkLoop:Disconnect() end
+    autoAtkLoop = RunService.Heartbeat:Connect(function()
         if not AutoAttackEnabled then return end
-
         local targetHRP = getTarget()
         if not targetHRP then return end
-
-        local localChar = LocalPlayer.Character
-        if not localChar then return end
-
-        local tool = LocalPlayer.Character:FindFirstChildOfClass("Tool")
-        if tool and tool:FindFirstChild("Handle") then
-            local dist = (targetHRP.Position - localChar:FindFirstChild("HumanoidRootPart").Position).Magnitude
-            if dist <= (DistanceValue + 3) then
-                -- Simula clique/ativação da tool
-                local activateEvent = tool:FindFirstChild("Activate") or tool:FindFirstChild("RemoteEvent")
-                if activateEvent then
-                    pcall(function() activateEvent:FireServer() end)
-                end
+        local char = LocalPlayer.Character
+        if not char then return end
+        local myRoot = char:FindFirstChild("HumanoidRootPart")
+        if not myRoot then return end
+        local dist = (targetHRP.Position - myRoot.Position).Magnitude
+        if dist <= DistanceValue + 4 then
+            local tool = char:FindFirstChildOfClass("Tool")
+            if tool then
+                local evt = tool:FindFirstChild("RemoteEvent") or tool:FindFirstChild("Activate")
+                if evt then pcall(function() evt:FireServer() end) end
             end
         end
     end)
 end
 
--- ============================================================
--- INICIALIZA LOOPS
--- ============================================================
 startAttachLoop()
 startOrbitLoop()
 startAutoAttack()
 
--- ============================================================
--- WIND UI v2 — INTERFACE
--- ============================================================
+-- ═══════════════════════════════════
+--  WINDOW
+-- ═══════════════════════════════════
 local Window = WindUI:CreateWindow({
     Title       = "CoiledTom Hub",
-    Icon        = "rbxassetid://10723407389",
+    Icon        = "solar:planet-bold",
     Author      = "by CoiledTom",
-    Transparent = true,
+    Folder      = "CoiledTomHub",
+    Size        = UDim2.fromOffset(580, 480),
     Theme       = "Dark",
-    DisableResize = false,
-    SideBarWidth = 200,
+    Transparent = true,
 })
 
--- ============================================================
--- ABA: TARGET ATTACH
--- ============================================================
-local TabAttach = Window:Tab({
-    Name = "Target Attach",
-    Icon = "crosshair",
-})
+-- ═══════════════════════════════════
+--  TABS
+-- ═══════════════════════════════════
+local TabAttach = Window:Tab({ Title = "Target Attach", Icon = "solar:crosshairs-bold"  })
+local TabWin    = Window:Tab({ Title = "eu consegui 😌", Icon = "solar:star-bold"       })
 
--- ───────────────────────────────────────────────
--- SEÇÃO: Player Selection
--- ───────────────────────────────────────────────
-TabAttach:Section({ Name = "Player Selection" })
+-- ══════════════════════════════════════════════════════
+--  ABA: TARGET ATTACH
+-- ══════════════════════════════════════════════════════
+do
+    TabAttach:Section({ Title = "Player Selection" })
 
-local function getPlayerNames()
-    local names = {}
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer then
-            table.insert(names, p.Name)
+    local function getPlayerNames()
+        local names = {}
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then
+                table.insert(names, p.Name)
+            end
         end
+        if #names == 0 then table.insert(names, "Nenhum player") end
+        return names
     end
-    if #names == 0 then
-        table.insert(names, "(Nenhum player)")
-    end
-    return names
+
+    local playerDropdown
+    playerDropdown = TabAttach:Dropdown({
+        Title    = "Select Target",
+        Desc     = "Escolha o player alvo",
+        Options  = getPlayerNames(),
+        Default  = getPlayerNames()[1],
+        Callback = function(selected)
+            TargetPlayer = Players:FindFirstChild(selected) or nil
+            WindUI:Notify({ Title = "Target", Content = "Alvo: " .. selected, Duration = 2 })
+        end,
+    })
+
+    Players.PlayerAdded:Connect(function()
+        task.wait(0.5)
+        pcall(function() playerDropdown:Refresh(getPlayerNames()) end)
+    end)
+    Players.PlayerRemoving:Connect(function(p)
+        if p == TargetPlayer then TargetPlayer = nil; AttachEnabled = false end
+        task.wait(0.5)
+        pcall(function() playerDropdown:Refresh(getPlayerNames()) end)
+    end)
+
+    TabAttach:Button({
+        Title    = "Atualizar Lista",
+        Icon     = "solar:refresh-bold",
+        Desc     = "Recarrega os players disponíveis",
+        Callback = function()
+            pcall(function() playerDropdown:Refresh(getPlayerNames()) end)
+            WindUI:Notify({ Title = "Players", Content = "Lista atualizada!", Duration = 2 })
+        end,
+    })
+
+    TabAttach:Section({ Title = "Position Mode" })
+
+    TabAttach:Dropdown({
+        Title    = "Position Type",
+        Desc     = "Posição relativa ao alvo",
+        Options  = { "Behind", "Front", "Above", "Below", "Left", "Right", "TopDown", "Orbit" },
+        Default  = "Behind",
+        Callback = function(selected)
+            SelectedPosition = selected
+        end,
+    })
+
+    TabAttach:Section({ Title = "Movement Settings" })
+
+    TabAttach:Slider({
+        Title = "Distance",
+        Desc  = "Distância até o alvo (studs)",
+        Step  = 1,
+        Value = { Min = 1, Max = 30, Default = 5 },
+        Callback = function(v)
+            DistanceValue = v
+        end,
+    })
+
+    TabAttach:Slider({
+        Title = "Tween Speed",
+        Desc  = "Velocidade do movimento suave",
+        Step  = 1,
+        Value = { Min = 1, Max = 20, Default = 7 },
+        Callback = function(v)
+            SpeedValue = 0.5 / v
+        end,
+    })
+
+    TabAttach:Slider({
+        Title = "Orbit Speed",
+        Desc  = "Velocidade de rotação no modo Orbit",
+        Step  = 1,
+        Value = { Min = 1, Max = 10, Default = 3 },
+        Callback = function(v)
+            OrbitSpeedValue = v * 0.5
+        end,
+    })
+
+    TabAttach:Section({ Title = "Controls" })
+
+    TabAttach:Toggle({
+        Title = "Toggle Attach",
+        Desc  = "Ativa movimentação relativa ao alvo",
+        Value = false,
+        Callback = function(v)
+            AttachEnabled = v
+            if not v and currentTween then currentTween:Cancel() end
+            WindUI:Notify({
+                Title   = "Attach",
+                Content = v and "Attach ATIVADO!" or "Attach desativado.",
+                Duration = 2,
+            })
+        end,
+    })
+
+    TabAttach:Toggle({
+        Title = "Auto Attack",
+        Desc  = "Ataca automaticamente o alvo (tool equipada)",
+        Value = false,
+        Callback = function(v)
+            AutoAttackEnabled = v
+            WindUI:Notify({
+                Title   = "Auto Attack",
+                Content = v and "Auto Attack ATIVADO!" or "Auto Attack desativado.",
+                Duration = 2,
+            })
+        end,
+    })
 end
 
-local playerDropdown
-playerDropdown = TabAttach:Dropdown({
-    Name    = "Select Target",
-    Options = getPlayerNames(),
-    Default = getPlayerNames()[1] or "(Nenhum player)",
-    Tooltip = "Escolha o player alvo",
-    Callback = function(selected)
-        local found = Players:FindFirstChild(selected)
-        TargetPlayer = found or nil
-    end,
+-- ══════════════════════════════════════════════════════
+--  ABA: EU CONSEGUI 😌
+-- ══════════════════════════════════════════════════════
+do
+    TabWin:Section({ Title = "Missão Cumprida!" })
+    TabWin:Section({ Title = "O Target Attach está funcionando. Bom jogo! 😌" })
+    TabWin:Section({ Title = "Créditos" })
+    TabWin:Section({ Title = "Script: CoiledTom | UI: Wind UI v2 by Footagesus" })
+
+    TabWin:Button({
+        Title    = "Fechar aviso",
+        Icon     = "solar:check-circle-bold",
+        Desc     = "Fechar esta mensagem",
+        Callback = function()
+            WindUI:Notify({ Title = "CoiledTom Hub", Content = "Pronto! Bom jogo 😌", Duration = 3 })
+        end,
+    })
+end
+
+-- ══════════════════════════════════════════════════════
+--  NOTIFICAÇÃO INICIAL
+-- ══════════════════════════════════════════════════════
+WindUI:Notify({
+    Title    = "CoiledTom Hub",
+    Content  = "Target Attach carregado com sucesso!",
+    Duration = 4,
 })
-
--- Atualizar lista ao entrar/sair
-Players.PlayerAdded:Connect(function()
-    task.wait(0.5)
-    playerDropdown:Refresh(getPlayerNames(), true)
-end)
-
-Players.PlayerRemoving:Connect(function(p)
-    if p == TargetPlayer then
-        TargetPlayer = nil
-        AttachEnabled = false
-    end
-    task.wait(0.5)
-    playerDropdown:Refresh(getPlayerNames(), true)
-end)
-
--- ───────────────────────────────────────────────
--- SEÇÃO: Position Selection
--- ───────────────────────────────────────────────
-TabAttach:Section({ Name = "Position Type" })
-
-TabAttach:Dropdown({
-    Name    = "Position Mode",
-    Options = { "Behind", "Front", "Above", "Below", "Left", "Right", "TopDown", "Orbit" },
-    Default = "Behind",
-    Tooltip = "Posição relativa ao alvo",
-    Callback = function(selected)
-        SelectedPosition = selected
-    end,
-})
-
--- ───────────────────────────────────────────────
--- SEÇÃO: Sliders
--- ───────────────────────────────────────────────
-TabAttach:Section({ Name = "Movement Settings" })
-
-TabAttach:Slider({
-    Name    = "Distance",
-    Min     = 1,
-    Max     = 30,
-    Default = 5,
-    Tooltip = "Distância até o alvo",
-    Callback = function(val)
-        DistanceValue = val
-    end,
-})
-
-TabAttach:Slider({
-    Name    = "Tween Speed",
-    Min     = 1,
-    Max     = 20,
-    Default = 7,
-    Tooltip = "Velocidade do movimento (maior = mais rápido)",
-    Callback = function(val)
-        -- Converte escala 1-20 para tempo de tween (menor = mais rápido)
-        SpeedValue = 0.5 / val
-    end,
-})
-
-TabAttach:Slider({
-    Name    = "Orbit Speed",
-    Min     = 1,
-    Max     = 10,
-    Default = 3,
-    Tooltip = "Velocidade de rotação no modo Orbit",
-    Callback = function(val)
-        OrbitSpeedValue = val * 0.5
-    end,
-})
-
--- ───────────────────────────────────────────────
--- SEÇÃO: Toggles
--- ───────────────────────────────────────────────
-TabAttach:Section({ Name = "Controls" })
-
-TabAttach:Toggle({
-    Name    = "Toggle Attach",
-    Default = false,
-    Tooltip = "Ativa movimentação relativa ao alvo",
-    Callback = function(state)
-        AttachEnabled = state
-        if not state and currentTween then
-            currentTween:Cancel()
-        end
-    end,
-})
-
-TabAttach:Toggle({
-    Name    = "Auto Attack",
-    Default = false,
-    Tooltip = "Ataca automaticamente o alvo (requer tool equipada)",
-    Callback = function(state)
-        AutoAttackEnabled = state
-    end,
-})
-
--- ============================================================
--- ABA: Eu Consegui 😌
--- ============================================================
-local TabWin = Window:Tab({
-    Name = "eu consegui 😌",
-    Icon = "party-popper",
-})
-
-TabWin:Section({ Name = "🎉 Parabéns!" })
-
-TabWin:Paragraph({
-    Title   = "Missão Cumprida 😌",
-    Content = "Você configurou o Target Attach com sucesso!\nO CoiledTom Hub está funcionando corretamente.\n\nAproveite o script!",
-})
-
-TabWin:Paragraph({
-    Title   = "Créditos",
-    Content = "Script desenvolvido por CoiledTom.\nUI: Wind UI v2 by Footagesus.\nDistribuição via GitHub & Discord.",
-})
-
-TabWin:Button({
-    Name    = "✅ Fechar aviso",
-    Tooltip = "Fechar mensagem",
-    Callback = function()
-        WindUI:Notify({
-            Title   = "CoiledTom Hub",
-            Content = "Pronto! Bom jogo 😌",
-            Duration = 3,
-        })
-    end,
-})
-
--- ============================================================
--- FIM DO SCRIPT
--- ============================================================
-print("[CoiledTom Hub] Target Attach carregado com sucesso!")

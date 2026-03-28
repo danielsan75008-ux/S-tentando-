@@ -1,7 +1,5 @@
--- ============================================================
---   CoiledTom Hub | Target Attach System
---   Wind UI v2 | By CoiledTom
--- ============================================================
+-- CoiledTom Hub | Target Attach System
+-- Wind UI v2 | By CoiledTom
 
 local WindUI
 do
@@ -12,7 +10,8 @@ do
         ))()
     end)
     if not ok then
-        error("[CoiledTom Hub] Falha ao carregar Wind UI v2:\n" .. tostring(result))
+        warn("[CoiledTom Hub] Falha ao carregar Wind UI v2: " .. tostring(result))
+        return
     end
     WindUI = result
 end

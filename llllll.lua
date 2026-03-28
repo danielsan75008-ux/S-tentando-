@@ -146,12 +146,17 @@ do
     end
 
     local playerDropdown
-    local initialList = getPlayerNames()
+
+    local function refreshDropdown()
+        local names = getPlayerNames()
+        pcall(function() playerDropdown:Refresh(names) end)
+    end
+
     playerDropdown = TabAttach:Dropdown({
         Title    = "Select Target",
         Desc     = "Escolha o player alvo",
-        Options  = initialList,
-        Default  = initialList[1],
+        Options  = getPlayerNames(),
+        Default  = getPlayerNames()[1],
         Callback = function(selected)
             if selected ~= "(Nenhum player)" then
                 TargetPlayer = Players:FindFirstChild(selected) or nil
@@ -162,14 +167,20 @@ do
         end,
     })
 
+    -- Aguarda 1s e já atualiza automaticamente ao carregar
+    task.defer(function()
+        task.wait(1)
+        pcall(refreshDropdown)
+    end)
+
     Players.PlayerAdded:Connect(function()
         task.wait(0.5)
-        pcall(function() playerDropdown:Refresh(getPlayerNames()) end)
+        pcall(refreshDropdown)
     end)
     Players.PlayerRemoving:Connect(function(p)
         if p == TargetPlayer then TargetPlayer = nil; AttachEnabled = false end
         task.wait(0.5)
-        pcall(function() playerDropdown:Refresh(getPlayerNames()) end)
+        pcall(refreshDropdown)
     end)
 
     TabAttach:Button({
@@ -177,8 +188,18 @@ do
         Icon     = "solar:refresh-bold",
         Desc     = "Recarrega os players disponíveis",
         Callback = function()
-            pcall(function() playerDropdown:Refresh(getPlayerNames()) end)
+            pcall(refreshDropdown)
             WindUI:Notify({ Title = "Players", Content = "Lista atualizada!", Duration = 2 })
+        end,
+    })
+
+    TabAttach:Button({
+        Title    = "Anti Bug",
+        Icon     = "solar:bug-bold",
+        Desc     = "Clique em mim se estiver bugado",
+        Callback = function()
+            pcall(refreshDropdown)
+            WindUI:Notify({ Title = "Anti Bug", Content = "Lista corrigida!", Duration = 2 })
         end,
     })
 

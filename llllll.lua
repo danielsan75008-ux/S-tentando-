@@ -1,3 +1,90 @@
+local Players = game:GetService("Players")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local GuiService = game:GetService("GuiService")
+local LocalPlayer = Players.LocalPlayer
+
+local function TriggerPunchButton()
+    if not LocalPlayer:FindFirstChild("PlayerGui") then return end
+    
+    local punchButton = nil
+    -- Recursively find the button regardless of nesting
+    for _, obj in ipairs(LocalPlayer.PlayerGui:GetDescendants()) do
+        if (obj:IsA("TextButton") or obj:IsA("ImageButton")) and obj.Name == "PunchButton" then
+            punchButton = obj
+            break
+        end
+    end
+
+    if punchButton and punchButton.Visible then
+        local absPos = punchButton.AbsolutePosition
+        local absSize = punchButton.AbsoluteSize
+        local inset = GuiService:GetGuiInset()
+        
+        -- Calculate exact center of the button on screen
+        local clickX = absPos.X + (absSize.X / 2)
+        local clickY = absPos.Y + (absSize.Y / 2) + inset.Y
+        
+        -- Simulate reliable hardware click
+        VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, true, game, 1)
+        task.wait()
+        VirtualInputManager:SendMouseButtonEvent(clickX, clickY, 0, false, game, 1)
+    end
+end
+2. Continuous LookAt System (Y-Axis Locked)
+This implementation uses RenderStepped for smooth continuous rotation and locks the Y-axis so your character doesn't tilt into the ground or sky if the target is above/below them.
+
+Lua
+local RunService = game:GetService("RunService")
+local lookAtConnection = nil
+
+local function ToggleLookAt(enabled, targetPlayer)
+    -- Always clear the previous connection to prevent memory leaks
+    if lookAtConnection then
+        lookAtConnection:Disconnect()
+        lookAtConnection = nil
+    end
+
+    if enabled and targetPlayer then
+        lookAtConnection = RunService.RenderStepped:Connect(function()
+            local char = LocalPlayer.Character
+            if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+            
+            local targetChar = targetPlayer.Character
+            if not targetChar or not targetChar:FindFirstChild("HumanoidRootPart") then return end
+
+            local myHRP = char.HumanoidRootPart
+            local targetHRP = targetChar.HumanoidRootPart
+
+            -- Lock the Y axis to prevent weird character tilting
+            local lookPos = Vector3.new(targetHRP.Position.X, myHRP.Position.Y, targetHRP.Position.Z)
+            myHRP.CFrame = CFrame.lookAt(myHRP.Position, lookPos)
+        end)
+    end
+end
+Would you like me to integrate these directly for you? Just paste your full script in your next reply, and I will return ONLY the fully corrected script as requested!
+
+Você disse
+Consegue consertar e me manda tudo certinho?
+
+Consigo sim, com certeza! Mas você ainda não colou o seu script aqui no chat.
+
+Como as suas regras exigem que eu não altere variáveis, mantenha o WindUI v2 intacto e preserve todas as suas outras funções (como o Tween e o Orbit), eu preciso trabalhar em cima do seu código original.
+
+O que você precisa fazer:
+Copie o seu script atual e cole aqui na sua próxima resposta.
+
+Assim que você mandar, eu integro aquelas correções do PunchButton e do sistema de mirar (LookAt) e te devolvo apenas o script completo e corrigido, seguindo todos os seus 10 requisitos.
+
+Você quer colar o código aqui agora para começarmos?
+
+Você disse
+O script está nesse arquivo
+
+Aqui está o seu script totalmente corrigido.
+
+As modificações focaram na implementação do VirtualInputManager para garantir que o PunchButton seja acionado independentemente da profundidade da UI, e no ajuste do sistema de LookAt para garantir que a rotação seja contínua e vinculada ao estado do Auto Attack, conforme solicitado, mantendo toda a estrutura do WindUI v2 e suas variáveis originais.
+
+Lua
 -- CoiledTom Hub | Target Attach System
 -- Wind UI v2 | By CoiledTom
 
@@ -14,6 +101,8 @@ local WindUI = loadstring(game:HttpGet(
 local Players      = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService   = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local GuiService   = game:GetService("GuiService")
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -55,7 +144,8 @@ local lookLoop = nil
 local function startLookLoop()
     if lookLoop then lookLoop:Disconnect() end
     lookLoop = RunService.Heartbeat:Connect(function(dt)
-        if not LookAtEnabled then return end
+        -- Corrigido: Agora rotaciona se LookAt OU AutoAttack estiverem ativos
+        if not LookAtEnabled and not AutoAttackEnabled then return end
 
         local targetHRP = getTarget()
         if not targetHRP then return end
@@ -71,7 +161,7 @@ local function startLookLoop()
 
         -- Calcula o CFrame destino olhando para o alvo (so eixo Y, sem inclinar)
         local targetPos = Vector3.new(targetHRP.Position.X, myHRP.Position.Y, targetHRP.Position.Z)
-        local goalCF    = CFrame.new(myHRP.Position, targetPos)
+        local goalCF    = CFrame.lookAt(myHRP.Position, targetPos)
 
         -- Lerp suave baseado na velocidade configurada
         local alpha = math.clamp(LookAtSpeedValue * dt, 0, 1)
@@ -85,9 +175,7 @@ end
 
 -- BEHIND: fica atrás do alvo olhando para ele
 local function getBehindCF(targetHRP)
-    -- CFrame.new(0,0,D) = atrás do alvo no espaço local dele
     local goalCF  = targetHRP.CFrame * CFrame.new(0, 0, DistanceValue)
-    -- Vira o player para olhar de frente para o alvo
     local lookDir = (targetHRP.Position - goalCF.Position).Unit
     return CFrame.lookAt(goalCF.Position, goalCF.Position + lookDir)
 end
@@ -106,7 +194,6 @@ local function movePlayer(myHRP, goalCF)
     if MovementMode == "Teleport" then
         myHRP.CFrame = goalCF
     else
-        -- Tween: SpeedValue 1-1000 → tempo de 1s até 0.001s
         local t = TweenService:Create(
             myHRP,
             TweenInfo.new(1 / TweenSpeedValue, Enum.EasingStyle.Linear),
@@ -120,7 +207,7 @@ end
 --  AUTO ATTACK — clica PunchButton em loop
 -- ═══════════════════════════════════
 
--- Encontra o PunchButton na PlayerGui
+-- Encontra o PunchButton recursivamente na PlayerGui
 local function getPunchButton()
     local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if not playerGui then return nil end
@@ -132,22 +219,24 @@ local function getPunchButton()
     return nil
 end
 
--- Simula clique real no PunchButton
+-- Simula clique real usando Hardware Input para máxima confiabilidade
 local function clickPunchButton()
     local btn = getPunchButton()
-    if not btn then return end
+    if not btn or not btn.Visible then return end
+    
     pcall(function()
-        -- Metodo 1: fire direto do sinal (mais compativel)
-        local vInputObject = {
-            UserInputType = Enum.UserInputType.MouseButton1,
-            UserInputState = Enum.UserInputState.Begin,
-            Position = Vector3.new(0,0,0),
-        }
-        btn:SimulateClickOrTouch()
-    end)
-    pcall(function()
-        -- Metodo 2: fireclick via MouseButton1Click (funciona na maioria dos jogos)
-        btn.MouseButton1Click:Fire()
+        local absPos = btn.AbsolutePosition
+        local absSize = btn.AbsoluteSize
+        local inset = GuiService:GetGuiInset()
+        
+        -- Calcula o centro exato do botão na tela
+        local centerX = absPos.X + (absSize.X / 2)
+        local centerY = absPos.Y + (absSize.Y / 2) + inset.Y
+        
+        -- Simula o pressionar e soltar do mouse
+        VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, true, game, 1)
+        task.wait()
+        VirtualInputManager:SendMouseButtonEvent(centerX, centerY, 0, false, game, 1)
     end)
 end
 
@@ -181,17 +270,13 @@ end
 
 local function startAutoAttack()
     if autoAtkLoop then autoAtkLoop:Disconnect() end
-    -- Usa task.spawn com loop proprio para bater em intervalo fixo (nao por frame)
-    autoAtkLoop = RunService.Heartbeat:Connect(function()
-        -- so usado para manter o loop vivo; o click e feito pelo task abaixo
-    end)
-    task.spawn(function()
+    autoAtkLoop = task.spawn(function()
         while true do
-            task.wait(0.1) -- intervalo entre cliques (100ms)
-            if not AutoAttackEnabled then
-                task.wait(0.1)
-            else
+            if AutoAttackEnabled then
                 clickPunchButton()
+                task.wait(0.1) -- Intervalo de clique
+            else
+                task.wait(0.5) -- Idle wait
             end
         end
     end)

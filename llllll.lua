@@ -155,8 +155,7 @@ do
     playerDropdown = TabAttach:Dropdown({
         Title    = "Select Target",
         Desc     = "Escolha o player alvo",
-        Options  = getPlayerNames(),
-        Default  = getPlayerNames()[1],
+        Values   = getPlayerNames(),
         Callback = function(selected)
             if selected ~= "(Nenhum player)" then
                 TargetPlayer = Players:FindFirstChild(selected) or nil
@@ -211,11 +210,9 @@ do
     TabAttach:Dropdown({
         Title    = "Position Type",
         Desc     = "Behind = atrás instantâneo | OrbitTop = órbita em cima",
-        Options  = posOptions,
-        Default  = "Behind",
+        Values   = posOptions,
         Callback = function(selected)
             SelectedPosition = tostring(selected)
-            -- Reseta ângulo ao trocar modo
             orbitAngle = 0
         end,
     })

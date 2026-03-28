@@ -11,9 +11,9 @@ local WindUI = loadstring(game:HttpGet(
 -- ═══════════════════════════════════
 --  SERVICES
 -- ═══════════════════════════════════
-local Players          = game:GetService("Players")
-local TweenService     = game:GetService("TweenService")
-local RunService       = game:GetService("RunService")
+local Players      = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService   = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -24,28 +24,27 @@ TargetPlayer      = nil
 AttachEnabled     = false
 AutoAttackEnabled = false
 DistanceValue     = 5
-SpeedValue        = 0.15
+SpeedValue        = 100   -- 1 a 1000, quanto maior mais rápido
 OrbitSpeedValue   = 1.5
 SelectedPosition  = "Behind"
 
-local orbitAngle    = 0
-local currentTween  = nil
-local attachLoop    = nil
-local orbitLoop     = nil
-local autoAtkLoop   = nil
+local orbitAngle  = 0
+local attachLoop  = nil
+local orbitLoop   = nil
+local autoAtkLoop = nil
 
 -- ═══════════════════════════════════
 --  TABELA DE POSIÇÕES
 -- ═══════════════════════════════════
 local Positions = {
-    Behind  = { offset = Vector3.new(0, 0,  1),  angle = 0           },
-    Front   = { offset = Vector3.new(0, 0, -1),  angle = math.pi     },
-    Above   = { offset = Vector3.new(0, 1,  0),  angle = 0           },
-    Below   = { offset = Vector3.new(0,-1,  0),  angle = 0           },
-    Left    = { offset = Vector3.new(-1, 0, 0),  angle = math.pi/2   },
-    Right   = { offset = Vector3.new( 1, 0, 0),  angle = -math.pi/2  },
-    TopDown = { offset = Vector3.new(0, 1,  0),  angle = math.pi/2   },
-    Orbit   = { offset = Vector3.new(0, 0,  1),  angle = 0           },
+    Behind  = { offset = Vector3.new(0, 0,  1), angle = 0          },
+    Front   = { offset = Vector3.new(0, 0, -1), angle = math.pi    },
+    Above   = { offset = Vector3.new(0, 1,  0), angle = 0          },
+    Below   = { offset = Vector3.new(0,-1,  0), angle = 0          },
+    Left    = { offset = Vector3.new(-1,0,  0), angle = math.pi/2  },
+    Right   = { offset = Vector3.new( 1,0,  0), angle =-math.pi/2  },
+    TopDown = { offset = Vector3.new(0, 1,  0), angle = math.pi/2  },
+    Orbit   = { offset = Vector3.new(0, 0,  1), angle = 0          },
 }
 
 -- ═══════════════════════════════════
@@ -65,23 +64,21 @@ local function getOffsetPosition(targetHRP, distance)
         return CFrame.new(targetHRP.Position + Vector3.new(x, 0, z))
             * CFrame.Angles(0, -(orbitAngle + math.pi / 2), 0)
     end
-
     local pos = Positions[SelectedPosition]
     if not pos then return nil end
-
     local scaledOffset = pos.offset * distance
     local worldOffset  = targetHRP.CFrame:VectorToWorldSpace(scaledOffset)
-    return CFrame.new(targetHRP.Position + worldOffset)
-        * CFrame.Angles(0, pos.angle, 0)
+    return CFrame.new(targetHRP.Position + worldOffset) * CFrame.Angles(0, pos.angle, 0)
 end
 
+-- Tween suave: SpeedValue 1-1000 vira tempo de 1.0s até 0.001s
 local function createTween(character, goalCFrame)
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
-    if currentTween then currentTween:Cancel() end
-    local info = TweenInfo.new(SpeedValue, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
-    currentTween = TweenService:Create(hrp, info, { CFrame = goalCFrame })
-    currentTween:Play()
+    local tweenTime = 1.0 / SpeedValue  -- 1 = lento (1s), 1000 = quase instantâneo (0.001s)
+    local info = TweenInfo.new(tweenTime, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
+    local t = TweenService:Create(hrp, info, { CFrame = goalCFrame })
+    t:Play()
 end
 
 local function startAttachLoop()
@@ -93,7 +90,12 @@ local function startAttachLoop()
         local char = LocalPlayer.Character
         if not char then return end
         local goal = getOffsetPosition(targetHRP, DistanceValue)
-        if goal then createTween(char, goal) end
+        if not goal then return end
+        -- Movimento direto: rápido e responsivo
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.CFrame = hrp.CFrame:Lerp(goal, math.clamp(SpeedValue / 500, 0.05, 1))
+        end
     end)
 end
 
@@ -107,7 +109,11 @@ local function startOrbitLoop()
         local char = LocalPlayer.Character
         if not char then return end
         local goal = getOffsetPosition(targetHRP, DistanceValue)
-        if goal then createTween(char, goal) end
+        if not goal then return end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.CFrame = hrp.CFrame:Lerp(goal, math.clamp(SpeedValue / 500, 0.05, 1))
+        end
     end)
 end
 
@@ -149,16 +155,14 @@ local Window = WindUI:CreateWindow({
     Transparent = true,
 })
 
--- ═══════════════════════════════════
---  TABS
--- ═══════════════════════════════════
-local TabAttach = Window:Tab({ Title = "Target Attach", Icon = "solar:crosshairs-bold"  })
-local TabWin    = Window:Tab({ Title = "eu consegui 😌", Icon = "solar:star-bold"       })
+local TabAttach = Window:Tab({ Title = "Target Attach", Icon = "solar:crosshairs-bold" })
+local TabWin    = Window:Tab({ Title = "eu consegui 😌",  Icon = "solar:star-bold"     })
 
 -- ══════════════════════════════════════════════════════
 --  ABA: TARGET ATTACH
 -- ══════════════════════════════════════════════════════
 do
+    -- ── Player Selection ──────────────────────────────
     TabAttach:Section({ Title = "Player Selection" })
 
     local function getPlayerNames()
@@ -168,19 +172,26 @@ do
                 table.insert(names, p.Name)
             end
         end
-        if #names == 0 then table.insert(names, "Nenhum player") end
+        if #names == 0 then
+            table.insert(names, "(Nenhum player)")
+        end
         return names
     end
 
     local playerDropdown
+    local initialPlayers = getPlayerNames()
     playerDropdown = TabAttach:Dropdown({
         Title    = "Select Target",
         Desc     = "Escolha o player alvo",
-        Options  = getPlayerNames(),
-        Default  = getPlayerNames()[1],
+        Options  = initialPlayers,
+        Default  = initialPlayers[1],
         Callback = function(selected)
-            TargetPlayer = Players:FindFirstChild(selected) or nil
-            WindUI:Notify({ Title = "Target", Content = "Alvo: " .. selected, Duration = 2 })
+            if selected == "(Nenhum player)" then
+                TargetPlayer = nil
+            else
+                TargetPlayer = Players:FindFirstChild(selected) or nil
+                WindUI:Notify({ Title = "Target", Content = "Alvo: " .. tostring(selected), Duration = 2 })
+            end
         end,
     })
 
@@ -189,7 +200,10 @@ do
         pcall(function() playerDropdown:Refresh(getPlayerNames()) end)
     end)
     Players.PlayerRemoving:Connect(function(p)
-        if p == TargetPlayer then TargetPlayer = nil; AttachEnabled = false end
+        if p == TargetPlayer then
+            TargetPlayer = nil
+            AttachEnabled = false
+        end
         task.wait(0.5)
         pcall(function() playerDropdown:Refresh(getPlayerNames()) end)
     end)
@@ -204,18 +218,22 @@ do
         end,
     })
 
+    -- ── Position Mode ─────────────────────────────────
     TabAttach:Section({ Title = "Position Mode" })
 
+    -- FIX: Options como tabela de strings simples, Default igual ao primeiro item
+    local posOptions = {"Behind", "Front", "Above", "Below", "Left", "Right", "TopDown", "Orbit"}
     TabAttach:Dropdown({
         Title    = "Position Type",
         Desc     = "Posição relativa ao alvo",
-        Options  = { "Behind", "Front", "Above", "Below", "Left", "Right", "TopDown", "Orbit" },
-        Default  = "Behind",
+        Options  = posOptions,
+        Default  = posOptions[1],
         Callback = function(selected)
-            SelectedPosition = selected
+            SelectedPosition = tostring(selected)
         end,
     })
 
+    -- ── Movement Settings ─────────────────────────────
     TabAttach:Section({ Title = "Movement Settings" })
 
     TabAttach:Slider({
@@ -228,13 +246,14 @@ do
         end,
     })
 
+    -- SpeedValue de 1 a 1000 conforme pedido
     TabAttach:Slider({
         Title = "Tween Speed",
-        Desc  = "Velocidade do movimento suave",
+        Desc  = "Velocidade do movimento (1 = lento | 1000 = instantâneo)",
         Step  = 1,
-        Value = { Min = 1, Max = 20, Default = 7 },
+        Value = { Min = 1, Max = 1000, Default = 100 },
         Callback = function(v)
-            SpeedValue = 0.5 / v
+            SpeedValue = v
         end,
     })
 
@@ -248,6 +267,7 @@ do
         end,
     })
 
+    -- ── Controls ──────────────────────────────────────
     TabAttach:Section({ Title = "Controls" })
 
     TabAttach:Toggle({
@@ -256,10 +276,9 @@ do
         Value = false,
         Callback = function(v)
             AttachEnabled = v
-            if not v and currentTween then currentTween:Cancel() end
             WindUI:Notify({
-                Title   = "Attach",
-                Content = v and "Attach ATIVADO!" or "Attach desativado.",
+                Title    = "Attach",
+                Content  = v and "Attach ATIVADO!" or "Attach desativado.",
                 Duration = 2,
             })
         end,
@@ -272,8 +291,8 @@ do
         Callback = function(v)
             AutoAttackEnabled = v
             WindUI:Notify({
-                Title   = "Auto Attack",
-                Content = v and "Auto Attack ATIVADO!" or "Auto Attack desativado.",
+                Title    = "Auto Attack",
+                Content  = v and "Auto Attack ATIVADO!" or "Auto Attack desativado.",
                 Duration = 2,
             })
         end,

@@ -43,11 +43,28 @@ local function getTarget()
     return nil
 end
 
--- Faz o player local olhar para o alvo (mantém posição, só muda rotação)
+-- Faz o player local olhar para o alvo SEM mover de lugar (so rotaciona no eixo Y)
 local function lookAtTarget(myHRP, targetHRP)
     local pos    = myHRP.Position
     local lookAt = Vector3.new(targetHRP.Position.X, pos.Y, targetHRP.Position.Z)
-    myHRP.CFrame = CFrame.lookAt(pos, lookAt)
+    -- CFrame.new(pos, lookAt) aponta o +Z para o alvo sem mudar a posicao
+    myHRP.CFrame = CFrame.new(pos, lookAt)
+end
+
+-- Loop separado: fica girando o personagem para olhar o alvo SEMPRE que AttachEnabled ligado
+local lookLoop = nil
+local function startLookLoop()
+    if lookLoop then lookLoop:Disconnect() end
+    lookLoop = RunService.Heartbeat:Connect(function()
+        if not AttachEnabled then return end
+        local targetHRP = getTarget()
+        if not targetHRP then return end
+        local char = LocalPlayer.Character
+        if not char then return end
+        local myHRP = char:FindFirstChild("HumanoidRootPart")
+        if not myHRP then return end
+        lookAtTarget(myHRP, targetHRP)
+    end)
 end
 
 -- ═══════════════════════════════════
@@ -88,86 +105,62 @@ local function movePlayer(myHRP, goalCF)
 end
 
 -- ═══════════════════════════════════
---  AUTO ATTACK — procura botões/vars de ataque
+--  AUTO ATTACK — PunchButton + fallback remotes
 -- ═══════════════════════════════════
--- Nomes comuns de RemoteEvents, Functions e botões de ataque
-local ATTACK_KEYWORDS = {
-    "attack", "Attack", "ATTACK",
-    "hit", "Hit", "HIT",
-    "swing", "Swing",
-    "damage", "Damage",
-    "strike", "Strike",
-    "punch", "Punch",
-    "slash", "Slash",
-    "atk", "Atk", "ATK",
-    "combat", "Combat",
-    "fight", "Fight",
-}
 
-local function findAttackEvent(char)
-    -- 1. Procura na tool equipada
+-- Procura PunchButton em toda a PlayerGui e clica via MouseButton1Click
+local function findAndClickPunchButton()
+    local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if not playerGui then return false end
+    for _, obj in ipairs(playerGui:GetDescendants()) do
+        if (obj:IsA("TextButton") or obj:IsA("ImageButton")) and obj.Name == "PunchButton" then
+            -- Dispara o evento de clique do botao
+            pcall(function()
+                local conn
+                conn = obj.MouseButton1Click:Connect(function() end)
+                conn:Disconnect()
+                obj.MouseButton1Click:Fire()
+            end)
+            -- Tenta tambem via ClickDetector pai se existir
+            pcall(function() obj:Activate() end)
+            return true
+        end
+    end
+    return false
+end
+
+-- Fallback: procura RemoteEvents com keywords de ataque
+local ATTACK_KEYWORDS = { "attack", "Attack", "hit", "Hit", "punch", "Punch", "atk", "Atk", "swing", "Swing", "strike", "Strike" }
+
+local function fireAttackRemote(char)
+    -- 1. Tool equipada
     local tool = char:FindFirstChildOfClass("Tool")
     if tool then
         for _, obj in ipairs(tool:GetDescendants()) do
-            if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") or obj:IsA("BindableEvent") then
+            if obj:IsA("RemoteEvent") or obj:IsA("BindableEvent") then
                 for _, kw in ipairs(ATTACK_KEYWORDS) do
                     if string.find(obj.Name, kw) then
-                        return obj, "remote"
+                        pcall(function()
+                            if obj:IsA("RemoteEvent") then obj:FireServer()
+                            else obj:Fire() end
+                        end)
+                        return
                     end
                 end
             end
-            -- Procura por ClickDetector ou ProximityPrompt dentro da tool
-            if obj:IsA("ClickDetector") then
-                return obj, "click"
-            end
         end
+        -- Ativa a tool diretamente
+        pcall(function() tool:Activate() end)
     end
-
-    -- 2. Procura no personagem
-    for _, obj in ipairs(char:GetDescendants()) do
-        if obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction") or obj:IsA("BindableEvent") then
-            for _, kw in ipairs(ATTACK_KEYWORDS) do
-                if string.find(obj.Name, kw) then
-                    return obj, "remote"
-                end
-            end
-        end
-    end
-
-    -- 3. Procura no workspace (scripts de jogo que ficam fora do char)
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if (obj:IsA("RemoteEvent") or obj:IsA("RemoteFunction")) then
-            for _, kw in ipairs(ATTACK_KEYWORDS) do
-                if string.find(obj.Name, kw) then
-                    return obj, "remote"
-                end
-            end
-        end
-    end
-
-    return nil, nil
 end
 
 local function fireAttack(char)
-    local evt, kind = findAttackEvent(char)
-    if not evt then return end
-    pcall(function()
-        if kind == "remote" then
-            if evt:IsA("RemoteEvent") then
-                evt:FireServer()
-            elseif evt:IsA("RemoteFunction") then
-                evt:InvokeServer()
-            elseif evt:IsA("BindableEvent") then
-                evt:Fire()
-            end
-        elseif kind == "click" then
-            -- Simula click
-            local tool = char:FindFirstChildOfClass("Tool")
-            if tool then
-                tool:Activate()
-            end
-        end
-    end)
+    -- Primeiro tenta clicar o PunchButton na GUI
+    local clicked = findAndClickPunchButton()
+    -- Se nao achou PunchButton, usa fallback de remotes
+    if not clicked then
+        fireAttackRemote(char)
+    end
 end
 
 -- ═══════════════════════════════════
@@ -216,6 +209,7 @@ local function startAutoAttack()
 end
 
 startAttachLoop()
+startLookLoop()
 startAutoAttack()
 
 -- ═══════════════════════════════════
